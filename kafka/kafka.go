@@ -33,7 +33,6 @@ import (
 	"github.com/intelsdi-x/snap/core/ctypes"
 
 	"crypto/tls"
-	log "github.com/intelsdi-x/snap-plugin-utilities/logger"
 	"gopkg.in/Shopify/sarama.v1"
 )
 
@@ -92,15 +91,18 @@ func (k *kafkaPublisher) Publish(contentType string, content []byte, config map[
 	brokers := parseBrokerString(config["brokers"].(ctypes.ConfigValueStr).Value)
 
 	// Check if tls_certificate key exists in config map
-	if val, ok := config["tls_certificate"]; ok {
-		if val.(ctypes.ConfigValueStr).Value != "" {
-			log.LogInfo("TLS certificate defined within SNAP configuration. Enabling TLS.")
+	if cert_path, ok := config["tls_certificate"]; ok {
+		// Check if tls_key key exists in config map
+		if key_path, ok := config["tls_key"]; ok {
+			//check if value(s) within config map are empty
+			if cert_path.(ctypes.ConfigValueStr).Value != "" && key_path.(ctypes.ConfigValueStr).Value != "" {
 
-			tlsConfig := getTlsConfig(config)
+				tlsConfig := getTlsConfig(config)
 
-			return k.publish(topic, brokers, []byte(jsonOut), tlsConfig)
-		} else {
-			log.LogFatal("Please provide file path to location of your signed TLS certificate.")
+				return k.publish(topic, brokers, []byte(jsonOut), tlsConfig)
+			} else {
+				fmt.Errorf("Please check your certificate and private key configuration.")
+			}
 		}
 
 	}
@@ -171,8 +173,8 @@ func parseBrokerString(brokerStr string) []string {
 }
 
 func getTlsConfig(config map[string]ctypes.ConfigValue) *sarama.Config {
-	kconfig := sarama.NewConfig()
-	kconfig.Net.TLS.Enable = true
+	saramaConfig := sarama.NewConfig()
+	saramaConfig.Net.TLS.Enable = true
 
 	cert, err := tls.LoadX509KeyPair(config["tls_certificate"].(ctypes.ConfigValueStr).Value,
 		config["tls_key"].(ctypes.ConfigValueStr).Value)
@@ -182,9 +184,9 @@ func getTlsConfig(config map[string]ctypes.ConfigValue) *sarama.Config {
 
 	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
 
-	kconfig.Net.TLS.Config = tlsCfg
+	saramaConfig.Net.TLS.Config = tlsCfg
 
-	return kconfig
+	return saramaConfig
 }
 
 func handleErr(e error) {
