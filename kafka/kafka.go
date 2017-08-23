@@ -32,6 +32,8 @@ import (
 	"github.com/intelsdi-x/snap/control/plugin/cpolicy"
 	"github.com/intelsdi-x/snap/core/ctypes"
 
+	"crypto/tls"
+	log "github.com/intelsdi-x/snap-plugin-utilities/logger"
 	"gopkg.in/Shopify/sarama.v1"
 )
 
@@ -89,7 +91,21 @@ func (k *kafkaPublisher) Publish(contentType string, content []byte, config map[
 	topic := config["topic"].(ctypes.ConfigValueStr).Value
 	brokers := parseBrokerString(config["brokers"].(ctypes.ConfigValueStr).Value)
 
-	return k.publish(topic, brokers, []byte(jsonOut))
+	// Check if tls_certificate key exists in config map
+	if val, ok := config["tls_certificate"]; ok {
+		if val.(ctypes.ConfigValueStr).Value != "" {
+			log.LogInfo("TLS certificate defined within SNAP configuration. Enabling TLS.")
+
+			tlsConfig := getTlsConfig(config)
+
+			return k.publish(topic, brokers, []byte(jsonOut), tlsConfig)
+		} else {
+			log.LogFatal("Please provide file path to location of your signed TLS certificate.")
+		}
+
+	}
+
+	return k.publish(topic, brokers, []byte(jsonOut), nil)
 }
 
 func (k *kafkaPublisher) GetConfigPolicy() (*cpolicy.ConfigPolicy, error) {
@@ -110,8 +126,8 @@ func (k *kafkaPublisher) GetConfigPolicy() (*cpolicy.ConfigPolicy, error) {
 }
 
 // Internal method after data has been converted to serialized bytes to send
-func (k *kafkaPublisher) publish(topic string, brokers []string, content []byte) error {
-	producer, err := sarama.NewSyncProducer(brokers, nil)
+func (k *kafkaPublisher) publish(topic string, brokers []string, content []byte, tlsConfig *sarama.Config) error {
+	producer, err := sarama.NewSyncProducer(brokers, tlsConfig)
 	if err != nil {
 		return fmt.Errorf("Cannot initialize a new Sarama SyncProducer using the given broker addresses (%v), err=%v", brokers, err)
 	}
@@ -152,6 +168,23 @@ func parseBrokerString(brokerStr string) []string {
 
 	// return split brokers separated by semicolon
 	return strings.Split(brokers, ";")
+}
+
+func getTlsConfig(config map[string]ctypes.ConfigValue) *sarama.Config {
+	kconfig := sarama.NewConfig()
+	kconfig.Net.TLS.Enable = true
+
+	cert, err := tls.LoadX509KeyPair(config["tls_certificate"].(ctypes.ConfigValueStr).Value,
+		config["tls_key"].(ctypes.ConfigValueStr).Value)
+	if err != nil {
+		panic(err)
+	}
+
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
+
+	kconfig.Net.TLS.Config = tlsCfg
+
+	return kconfig
 }
 
 func handleErr(e error) {

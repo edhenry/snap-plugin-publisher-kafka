@@ -1,0 +1,7 @@
+---
+control:
+  plugins:
+    publisher:
+      kafka:
+        tls_certificate: /path/to/certificate
+        tls_key: /path/to/key
